@@ -40,6 +40,8 @@ const UTF8_REPLACEMENT_CHARACTER: &str = "\u{FFFD}";
 /// which represents a Unicode scalar value:
 /// a code point that is not a surrogate (U+D800 to U+DFFF).
 #[derive(Eq, PartialEq, Ord, PartialOrd, Clone, Copy)]
+#[rustc_layout_scalar_valid_range_start(0)]
+#[rustc_layout_scalar_valid_range_end(0x10FFFF)]
 pub struct CodePoint {
     value: u32,
 }
@@ -59,16 +61,23 @@ impl CodePoint {
     /// Only use when `value` is known to be less than or equal to 0x10FFFF.
     #[inline]
     pub unsafe fn from_u32_unchecked(value: u32) -> CodePoint {
-        CodePoint { value }
+        // SAFETY: caller must ensure `value` is in range.
+        assert_unsafe_precondition!(
+            check_library_ub,
+            "invalid value for `CodePoint`",
+            (i: u32 = value) => CodePoint::from_u32(i).is_some()
+        );
+        unsafe { CodePoint { value } }
     }
 
     /// Creates a new `CodePoint` if the value is a valid code point.
     ///
     /// Returns `None` if `value` is above 0x10FFFF.
     #[inline]
-    pub fn from_u32(value: u32) -> Option<CodePoint> {
+    pub const fn from_u32(value: u32) -> Option<CodePoint> {
         match value {
-            0..=0x10FFFF => Some(CodePoint { value }),
+            // SAFETY: we just checked that `value` is in range.
+            0..=0x10FFFF => unsafe { Some(CodePoint { value }) },
             _ => None,
         }
     }
@@ -78,7 +87,8 @@ impl CodePoint {
     /// Since all Unicode scalar values are code points, this always succeeds.
     #[inline]
     pub fn from_char(value: char) -> CodePoint {
-        CodePoint { value: value as u32 }
+        // SAFETY: all `char`s are also `CodePoint`s.
+        unsafe { Self::from_u32_unchecked(value as u32) }
     }
 
     /// Returns the numeric value of the code point.
@@ -971,7 +981,7 @@ impl<'a> Iterator for Wtf8CodePoints<'a> {
     #[inline]
     fn next(&mut self) -> Option<CodePoint> {
         // SAFETY: `self.bytes` has been created from a WTF-8 string
-        unsafe { next_code_point(&mut self.bytes).map(|c| CodePoint { value: c }) }
+        unsafe { next_code_point(&mut self.bytes).map(|c| CodePoint::from_u32_unchecked(c)) }
     }
 
     #[inline]
