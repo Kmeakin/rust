@@ -123,22 +123,22 @@ const fn contains_nonascii(x: usize) -> bool {
 /// returning `Ok(())` in that case, or, if it is invalid, `Err(err)`.
 #[inline(always)]
 #[rustc_allow_const_fn_unstable(const_eval_select)] // fallback impl has same behavior
-pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
+pub(super) const fn run_utf8_validation(bytes: &[u8]) -> Result<(), Utf8Error> {
     let mut index = 0;
-    let len = v.len();
+    let len = bytes.len();
 
     const USIZE_BYTES: usize = size_of::<usize>();
+    const ASCII_BLOCK_SIZE: usize = 2 * USIZE_BYTES;
 
-    let ascii_block_size = 2 * USIZE_BYTES;
-    let blocks_end = if len >= ascii_block_size { len - ascii_block_size + 1 } else { 0 };
+    let blocks_end = if len >= ASCII_BLOCK_SIZE { len - ASCII_BLOCK_SIZE + 1 } else { 0 };
     // Below, we safely fall back to a slower codepath if the offset is `usize::MAX`,
     // so the end-to-end behavior is the same at compiletime and runtime.
     let align = const_eval_select!(
-        @capture { v: &[u8] } -> usize:
+        @capture { bytes: &[u8] } -> usize:
         if const {
             usize::MAX
         } else {
-            v.as_ptr().align_offset(USIZE_BYTES)
+            bytes.as_ptr().align_offset(USIZE_BYTES)
         }
     );
 
@@ -155,15 +155,14 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
                 index += 1;
                 // we needed data, but there was none: error!
                 if index >= len {
-                    err!(None)
+                    err!(0)
                 }
-                v[index]
+                bytes[index]
             }};
         }
 
-        let first = v[index];
-        if first >= 128 {
-            let w = utf8_char_width(first);
+        let b1 = bytes[index];
+        if b1 >= 0x80 {
             // 2-byte encoding is for codepoints  \u{0080} to  \u{07ff}
             //        first  C2 80        last DF BF
             // 3-byte encoding is for codepoints  \u{0800} to  \u{ffff}
@@ -176,43 +175,54 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
             // Use the UTF-8 syntax from the RFC
             //
             // https://tools.ietf.org/html/rfc3629
+            // UTF8-tail   = %x80-BF
             // UTF8-1      = %x00-7F
             // UTF8-2      = %xC2-DF UTF8-tail
             // UTF8-3      = %xE0 %xA0-BF UTF8-tail / %xE1-EC 2( UTF8-tail ) /
             //               %xED %x80-9F UTF8-tail / %xEE-EF 2( UTF8-tail )
             // UTF8-4      = %xF0 %x90-BF 2( UTF8-tail ) / %xF1-F3 3( UTF8-tail ) /
             //               %xF4 %x80-8F 2( UTF8-tail )
-            match w {
-                2 => {
-                    if next!() as i8 >= -64 {
-                        err!(Some(1))
+            if !matches!(b1, 0xC2..=0xF4) {
+                err!(1)
+            }
+
+            let b2 = next!();
+            if !utf8_is_cont_byte(b2) {
+                err!(1)
+            }
+
+            match b1 {
+                0xC2..=0xDF => {}
+                0xE0..=0xEF => {
+                    match (b1, b2) {
+                        (..0xA0, 0xE0) => err!(1),
+                        (0xA0.., 0xED) => err!(1),
+                        _ => {}
+                    }
+
+                    let b3 = next!();
+                    if !utf8_is_cont_byte(b3) {
+                        err!(2)
                     }
                 }
-                3 => {
-                    match (first, next!()) {
-                        (0xE0, 0xA0..=0xBF)
-                        | (0xE1..=0xEC, 0x80..=0xBF)
-                        | (0xED, 0x80..=0x9F)
-                        | (0xEE..=0xEF, 0x80..=0xBF) => {}
-                        _ => err!(Some(1)),
+                0xF0..=0xF4 => {
+                    match (b2, b1) {
+                        (..0x90, 0xF0) => err!(1),
+                        (0x90.., 0xF4) => err!(1),
+                        _ => {}
                     }
-                    if next!() as i8 >= -64 {
-                        err!(Some(2))
+
+                    let b3 = next!();
+                    if !utf8_is_cont_byte(b3) {
+                        err!(2)
                     }
-                }
-                4 => {
-                    match (first, next!()) {
-                        (0xF0, 0x90..=0xBF) | (0xF1..=0xF3, 0x80..=0xBF) | (0xF4, 0x80..=0x8F) => {}
-                        _ => err!(Some(1)),
-                    }
-                    if next!() as i8 >= -64 {
-                        err!(Some(2))
-                    }
-                    if next!() as i8 >= -64 {
-                        err!(Some(3))
+
+                    let b4 = next!();
+                    if !utf8_is_cont_byte(b4) {
+                        err!(3)
                     }
                 }
-                _ => err!(Some(1)),
+                _ => unreachable!(),
             }
             index += 1;
         } else {
@@ -220,7 +230,7 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
             // When the pointer is aligned, read 2 words of data per iteration
             // until we find a word containing a non-ascii byte.
             if align != usize::MAX && align.wrapping_sub(index) % USIZE_BYTES == 0 {
-                let ptr = v.as_ptr();
+                let ptr = bytes.as_ptr();
                 while index < blocks_end {
                     // SAFETY: since `align - index` and `ascii_block_size` are
                     // multiples of `USIZE_BYTES`, `block = ptr.add(index)` is
@@ -235,10 +245,10 @@ pub(super) const fn run_utf8_validation(v: &[u8]) -> Result<(), Utf8Error> {
                             break;
                         }
                     }
-                    index += ascii_block_size;
+                    index += ASCII_BLOCK_SIZE;
                 }
                 // step from the point where the wordwise loop stopped
-                while index < len && v[index] < 128 {
+                while index < len && bytes[index] < 128 {
                     index += 1;
                 }
             } else {

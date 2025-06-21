@@ -46,7 +46,7 @@ use crate::fmt;
 #[stable(feature = "rust1", since = "1.0.0")]
 pub struct Utf8Error {
     pub(super) valid_up_to: usize,
-    pub(super) error_len: Option<u8>,
+    pub(super) error_len: u8,
 }
 
 impl Utf8Error {
@@ -102,8 +102,8 @@ impl Utf8Error {
     pub const fn error_len(&self) -> Option<usize> {
         // FIXME(const-hack): This should become `map` again, once it's `const`
         match self.error_len {
-            Some(len) => Some(len as usize),
-            None => None,
+            0 => None,
+            len => Some(len as usize),
         }
     }
 }
