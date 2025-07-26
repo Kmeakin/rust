@@ -19,26 +19,19 @@ pub(crate) fn generate_case_mapping(data: &UnicodeData) -> String {
     file
 }
 
-fn generate_tables(case: &str, data: &BTreeMap<u32, (u32, u32, u32)>) -> String {
+fn generate_tables(case: &str, data: &BTreeMap<char, (char, char, char)>) -> String {
     let mut mappings = Vec::with_capacity(data.len());
     let mut multis = Vec::new();
 
     for (&key, &(a, b, c)) in data.iter() {
-        let key = char::from_u32(key).unwrap();
-
         if key.is_ascii() {
             continue;
         }
 
-        let value = if b == 0 && c == 0 {
-            a
+        let value = if b == '\0' && c == '\0' {
+            u32::from(a)
         } else {
-            multis.push([
-                CharEscape(char::from_u32(a).unwrap()),
-                CharEscape(char::from_u32(b).unwrap()),
-                CharEscape(char::from_u32(c).unwrap()),
-            ]);
-
+            multis.push([CharEscape(a), CharEscape(b), CharEscape(c)]);
             INDEX_MASK | (u32::try_from(multis.len()).unwrap() - 1)
         };
 

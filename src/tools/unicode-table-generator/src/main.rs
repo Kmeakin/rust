@@ -98,32 +98,41 @@ static PROPERTIES: &[&str] = &[
 
 struct UnicodeData {
     ranges: Vec<(&'static str, Vec<Range<u32>>)>,
-    to_upper: BTreeMap<u32, (u32, u32, u32)>,
-    to_lower: BTreeMap<u32, (u32, u32, u32)>,
+    to_upper: BTreeMap<char, (char, char, char)>,
+    to_lower: BTreeMap<char, (char, char, char)>,
 }
 
-fn to_mapping(origin: u32, codepoints: Vec<ucd_parse::Codepoint>) -> Option<(u32, u32, u32)> {
+#[track_caller]
+fn unwrap_codepoint(codepoint: ucd_parse::Codepoint) -> char {
+    match codepoint.scalar() {
+        Some(c) => c,
+        None => panic!("Invalid codepoint: {codepoint:#x?}"),
+    }
+}
+
+fn to_mapping(origin: char, codepoints: Vec<ucd_parse::Codepoint>) -> Option<(char, char, char)> {
     let mut a = None;
     let mut b = None;
     let mut c = None;
 
     for codepoint in codepoints {
-        if origin == codepoint.value() {
+        let ch = unwrap_codepoint(codepoint);
+        if origin == ch {
             return None;
         }
 
         if a.is_none() {
-            a = Some(codepoint.value());
+            a = Some(ch);
         } else if b.is_none() {
-            b = Some(codepoint.value());
+            b = Some(ch);
         } else if c.is_none() {
-            c = Some(codepoint.value());
+            c = Some(ch);
         } else {
             panic!("more than 3 mapped codepoints")
         }
     }
 
-    Some((a.unwrap(), b.unwrap_or(0), c.unwrap_or(0)))
+    Some((a.unwrap(), b.unwrap_or_default(), c.unwrap_or_default()))
 }
 
 static UNICODE_DIRECTORY: &str = "unicode-downloads";
@@ -148,6 +157,12 @@ fn load_data() -> UnicodeData {
     for row in ucd_parse::UnicodeDataExpander::new(
         ucd_parse::parse::<_, ucd_parse::UnicodeData>(&UNICODE_DIRECTORY).unwrap(),
     ) {
+        if row.codepoint.scalar().is_none() {
+            // Skip surrogates
+            continue;
+        }
+        let ch = unwrap_codepoint(row.codepoint);
+
         let general_category = if ["Nd", "Nl", "No"].contains(&row.general_category.as_str()) {
             "N"
         } else {
@@ -163,12 +178,14 @@ fn load_data() -> UnicodeData {
         if let Some(mapped) = row.simple_lowercase_mapping
             && mapped != row.codepoint
         {
-            to_lower.insert(row.codepoint.value(), (mapped.value(), 0, 0));
+            let mapped = unwrap_codepoint(mapped);
+            to_lower.insert(ch, (mapped, '\0', '\0'));
         }
         if let Some(mapped) = row.simple_uppercase_mapping
             && mapped != row.codepoint
         {
-            to_upper.insert(row.codepoint.value(), (mapped.value(), 0, 0));
+            let mapped = unwrap_codepoint(mapped);
+            to_upper.insert(ch, (mapped, '\0', '\0'));
         }
     }
 
@@ -178,7 +195,7 @@ fn load_data() -> UnicodeData {
             continue;
         }
 
-        let key = row.codepoint.value();
+        let key = unwrap_codepoint(row.codepoint);
         if let Some(lower) = to_mapping(key, row.lowercase) {
             to_lower.insert(key, lower);
         }
