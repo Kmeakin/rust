@@ -40,17 +40,23 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
 
     let mut tables = String::new();
 
+    let (keys, vals): (Vec<_>, Vec<_>) = mappings.into_iter().unzip();
+
     writeln!(
         tables,
-        "static {}CASE_TABLE: &[(char, u32); {}] = &[{}];",
-        case,
-        mappings.len(),
-        fmt_list(mappings)
+        "static {case}CASE_TABLE_KEYS: &[char; {}] = &[{}];",
+        keys.len(),
+        fmt_list(keys)
+    )?;
+    writeln!(
+        tables,
+        "static {case}CASE_TABLE_VALS: &[u32; {}] = &[{}];",
+        vals.len(),
+        fmt_list(vals)
     )?;
     write!(
         tables,
-        "static {}CASE_TABLE_MULTI: &[[char; 3]; {}] = &[{}];",
-        case,
+        "static {case}CASE_TABLE_MULTI: &[[char; 3]; {}] = &[{}];",
         multis.len(),
         fmt_list(multis)
     )?;
@@ -77,12 +83,12 @@ pub fn to_lower(c: char) -> [char; 3] {
                 let u = LOWERCASE_TABLE[i].1;
                 char::from_u32(u).map(|c| [c, '\0', '\0']).unwrap_or_else(|| {
                     // SAFETY: Index comes from statically generated table
-                    unsafe { *LOWERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize) }
+                    unsafe { *multis.get_unchecked((u & (INDEX_MASK - 1)) as usize) }
                 })
-            })
-            .unwrap_or([c, '\0', '\0'])
+            }
+            Err(_) => [c, '\0', '\0'],
+        }
     }
-}
 
 pub fn to_upper(c: char) -> [char; 3] {
     if c.is_ascii() {
@@ -99,5 +105,4 @@ pub fn to_upper(c: char) -> [char; 3] {
             })
             .unwrap_or([c, '\0', '\0'])
     }
-}
 ";
