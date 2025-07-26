@@ -1,8 +1,7 @@
 use std::char;
-use std::collections::BTreeMap;
 use std::fmt::{self, Write};
 
-use crate::{UnicodeData, fmt_list};
+use crate::{CaseMap, UnicodeData, fmt_list};
 
 const INDEX_MASK: u32 = 1 << 22;
 
@@ -19,23 +18,21 @@ pub(crate) fn generate_case_mapping(data: &UnicodeData) -> Result<String, fmt::E
     Ok(file)
 }
 
-fn generate_tables(
-    case: &str,
-    data: &BTreeMap<char, (char, char, char)>,
-) -> Result<String, fmt::Error> {
+fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
     let mut mappings = Vec::with_capacity(data.len());
     let mut multis = Vec::new();
 
-    for (&key, &(a, b, c)) in data.iter() {
+    for (&key, mapped) in data.iter() {
         if key.is_ascii() {
             continue;
         }
 
-        let value = if b == '\0' && c == '\0' {
-            u32::from(a)
-        } else {
-            multis.push([CharEscape(a), CharEscape(b), CharEscape(c)]);
-            INDEX_MASK | (u32::try_from(multis.len()).unwrap() - 1)
+        let value = match mapped {
+            &[a, '\0', '\0'] => u32::from(a),
+            &[a, b, c] => {
+                multis.push([CharEscape(a), CharEscape(b), CharEscape(c)]);
+                INDEX_MASK | (u32::try_from(multis.len()).unwrap() - 1)
+            }
         };
 
         mappings.push((CharEscape(key), value));
@@ -43,8 +40,20 @@ fn generate_tables(
 
     let mut tables = String::new();
 
-    writeln!(tables, "static {}CASE_TABLE: &[(char, u32)] = &[{}];", case, fmt_list(mappings))?;
-    write!(tables, "static {}CASE_TABLE_MULTI: &[[char; 3]] = &[{}];", case, fmt_list(multis))?;
+    writeln!(
+        tables,
+        "static {}CASE_TABLE: &[(char, u32); {}] = &[{}];",
+        case,
+        mappings.len(),
+        fmt_list(mappings)
+    )?;
+    write!(
+        tables,
+        "static {}CASE_TABLE_MULTI: &[[char; 3]; {}] = &[{}];",
+        case,
+        multis.len(),
+        fmt_list(multis)
+    )?;
 
     Ok(tables)
 }

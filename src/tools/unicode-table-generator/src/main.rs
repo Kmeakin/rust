@@ -96,10 +96,12 @@ static PROPERTIES: &[&str] = &[
     "N",
 ];
 
+type CaseMap = BTreeMap<char, [char; 3]>;
+
 struct UnicodeData {
     ranges: Vec<(&'static str, Vec<Range<char>>)>,
-    to_upper: BTreeMap<char, (char, char, char)>,
-    to_lower: BTreeMap<char, (char, char, char)>,
+    to_upper: CaseMap,
+    to_lower: CaseMap,
 }
 
 #[track_caller]
@@ -119,29 +121,14 @@ fn next_char(c: char) -> char {
     }
 }
 
-fn to_mapping(origin: char, codepoints: Vec<ucd_parse::Codepoint>) -> Option<(char, char, char)> {
-    let mut a = None;
-    let mut b = None;
-    let mut c = None;
-
-    for codepoint in codepoints {
-        let ch = unwrap_codepoint(codepoint);
-        if origin == ch {
-            return None;
-        }
-
-        if a.is_none() {
-            a = Some(ch);
-        } else if b.is_none() {
-            b = Some(ch);
-        } else if c.is_none() {
-            c = Some(ch);
-        } else {
-            panic!("more than 3 mapped codepoints")
-        }
+fn to_mapping(origin: char, codepoints: &[ucd_parse::Codepoint]) -> Option<[char; 3]> {
+    match codepoints {
+        &[a] if unwrap_codepoint(a) == origin => None,
+        &[a] => Some([unwrap_codepoint(a), '\0', '\0']),
+        &[a, b] => Some([unwrap_codepoint(a), unwrap_codepoint(b), '\0']),
+        &[a, b, c] => Some([unwrap_codepoint(a), unwrap_codepoint(b), unwrap_codepoint(c)]),
+        _ => unreachable!(),
     }
-
-    Some((a.unwrap(), b.unwrap_or_default(), c.unwrap_or_default()))
 }
 
 static UNICODE_DIRECTORY: &str = "unicode-downloads";
@@ -188,13 +175,13 @@ fn load_data() -> UnicodeData {
             && mapped != row.codepoint
         {
             let mapped = unwrap_codepoint(mapped);
-            to_lower.insert(ch, (mapped, '\0', '\0'));
+            to_lower.insert(ch, [mapped, '\0', '\0']);
         }
         if let Some(mapped) = row.simple_uppercase_mapping
             && mapped != row.codepoint
         {
             let mapped = unwrap_codepoint(mapped);
-            to_upper.insert(ch, (mapped, '\0', '\0'));
+            to_upper.insert(ch, [mapped, '\0', '\0']);
         }
     }
 
@@ -205,10 +192,10 @@ fn load_data() -> UnicodeData {
         }
 
         let key = unwrap_codepoint(row.codepoint);
-        if let Some(lower) = to_mapping(key, row.lowercase) {
+        if let Some(lower) = to_mapping(key, &row.lowercase) {
             to_lower.insert(key, lower);
         }
-        if let Some(upper) = to_mapping(key, row.uppercase) {
+        if let Some(upper) = to_mapping(key, &row.uppercase) {
             to_upper.insert(key, upper);
         }
     }
