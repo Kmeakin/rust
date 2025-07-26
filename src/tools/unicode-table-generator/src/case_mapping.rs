@@ -6,20 +6,23 @@ use crate::{UnicodeData, fmt_list};
 
 const INDEX_MASK: u32 = 1 << 22;
 
-pub(crate) fn generate_case_mapping(data: &UnicodeData) -> String {
+pub(crate) fn generate_case_mapping(data: &UnicodeData) -> Result<String, fmt::Error> {
     let mut file = String::new();
 
-    write!(file, "const INDEX_MASK: u32 = 0x{INDEX_MASK:x};").unwrap();
+    write!(file, "const INDEX_MASK: u32 = 0x{INDEX_MASK:x};")?;
     file.push_str("\n\n");
     file.push_str(HEADER.trim_start());
     file.push('\n');
-    file.push_str(&generate_tables("LOWER", &data.to_lower));
+    file.push_str(&generate_tables("LOWER", &data.to_lower)?);
     file.push_str("\n\n");
-    file.push_str(&generate_tables("UPPER", &data.to_upper));
-    file
+    file.push_str(&generate_tables("UPPER", &data.to_upper)?);
+    Ok(file)
 }
 
-fn generate_tables(case: &str, data: &BTreeMap<char, (char, char, char)>) -> String {
+fn generate_tables(
+    case: &str,
+    data: &BTreeMap<char, (char, char, char)>,
+) -> Result<String, fmt::Error> {
     let mut mappings = Vec::with_capacity(data.len());
     let mut multis = Vec::new();
 
@@ -40,15 +43,10 @@ fn generate_tables(case: &str, data: &BTreeMap<char, (char, char, char)>) -> Str
 
     let mut tables = String::new();
 
-    write!(tables, "static {}CASE_TABLE: &[(char, u32)] = &[{}];", case, fmt_list(mappings))
-        .unwrap();
+    writeln!(tables, "static {}CASE_TABLE: &[(char, u32)] = &[{}];", case, fmt_list(mappings))?;
+    write!(tables, "static {}CASE_TABLE_MULTI: &[[char; 3]] = &[{}];", case, fmt_list(multis))?;
 
-    tables.push_str("\n\n");
-
-    write!(tables, "static {}CASE_TABLE_MULTI: &[[char; 3]] = &[{}];", case, fmt_list(multis))
-        .unwrap();
-
-    tables
+    Ok(tables)
 }
 
 struct CharEscape(char);

@@ -97,7 +97,7 @@ static PROPERTIES: &[&str] = &[
 ];
 
 struct UnicodeData {
-    ranges: Vec<(&'static str, Vec<Range<u32>>)>,
+    ranges: Vec<(&'static str, Vec<Range<char>>)>,
     to_upper: BTreeMap<char, (char, char, char)>,
     to_lower: BTreeMap<char, (char, char, char)>,
 }
@@ -107,6 +107,15 @@ fn unwrap_codepoint(codepoint: ucd_parse::Codepoint) -> char {
     match codepoint.scalar() {
         Some(c) => c,
         None => panic!("Invalid codepoint: {codepoint:#x?}"),
+    }
+}
+
+#[track_caller]
+fn next_char(c: char) -> char {
+    let c = c as u32 + 1;
+    match char::from_u32(c) {
+        Some(c) => c,
+        None => panic!("Invalid next char for {c:#x}"),
     }
 }
 
@@ -204,24 +213,22 @@ fn load_data() -> UnicodeData {
         }
     }
 
-    let mut properties: HashMap<&'static str, Vec<Range<u32>>> = properties
+    let mut properties: HashMap<&'static str, Vec<Range<char>>> = properties
         .into_iter()
         .map(|(k, v)| {
             (
                 k,
                 v.into_iter()
                     .flat_map(|codepoints| match codepoints {
-                        Codepoints::Single(c) => c
-                            .scalar()
-                            .map(|ch| ch as u32..ch as u32 + 1)
-                            .into_iter()
-                            .collect::<Vec<_>>(),
+                        Codepoints::Single(c) => {
+                            c.scalar().map(|ch| ch..next_char(ch)).into_iter().collect::<Vec<_>>()
+                        }
                         Codepoints::Range(c) => c
                             .into_iter()
-                            .flat_map(|c| c.scalar().map(|ch| ch as u32..ch as u32 + 1))
+                            .flat_map(|c| c.scalar().map(|ch| ch..next_char(ch)))
                             .collect::<Vec<_>>(),
                     })
-                    .collect::<Vec<Range<u32>>>(),
+                    .collect::<Vec<Range<char>>>(),
             )
         })
         .collect();
@@ -259,8 +266,6 @@ fn main() {
     let mut total_bytes = 0;
     let mut modules = Vec::new();
     for (property, ranges) in ranges_by_property {
-        let datapoints = ranges.iter().map(|r| r.end - r.start).sum::<u32>();
-
         let mut emitter = RawEmitter::new();
         if property == &"White_Space" {
             emit_whitespace(&mut emitter, ranges);
@@ -268,15 +273,16 @@ fn main() {
             emit_codepoints(&mut emitter, ranges);
         }
 
+        let datapoints = ranges.into_iter().cloned().flatten().count();
         modules.push((property.to_lowercase().to_string(), emitter.file));
         println!(
-            "{:15}: {} bytes, {} codepoints in {} ranges ({} - {}) using {}",
+            "{:15}: {} bytes, {} codepoints in {} ranges ('{}' - '{}') using {}",
             property,
             emitter.bytes_used,
             datapoints,
             ranges.len(),
-            ranges.first().unwrap().start,
-            ranges.last().unwrap().end,
+            ranges.first().unwrap().start.escape_unicode(),
+            ranges.last().unwrap().end.escape_unicode(),
             emitter.desc,
         );
         total_bytes += emitter.bytes_used;
@@ -297,7 +303,10 @@ fn main() {
 
     table_file.push('\n');
 
-    modules.push((String::from("conversions"), case_mapping::generate_case_mapping(&unicode_data)));
+    modules.push((
+        String::from("conversions"),
+        case_mapping::generate_case_mapping(&unicode_data).unwrap(),
+    ));
 
     for (name, contents) in modules {
         table_file.push_str("#[rustfmt::skip]\n");
@@ -354,7 +363,7 @@ fn fmt_list<V: std::fmt::Debug>(values: impl IntoIterator<Item = V>) -> String {
     out
 }
 
-fn generate_tests(data_path: &str, ranges: &[(&str, Vec<Range<u32>>)]) -> String {
+fn generate_tests(data_path: &str, ranges: &[(&str, Vec<Range<char>>)]) -> String {
     let mut s = String::new();
     s.push_str("#![allow(incomplete_features, unused)]\n");
     s.push_str("#![feature(const_generics)]\n\n");
@@ -371,14 +380,11 @@ fn generate_tests(data_path: &str, ranges: &[(&str, Vec<Range<u32>>)]) -> String
         s.push_str(&format!("    {}_false();\n", property.to_lowercase()));
         let mut is_true = Vec::new();
         let mut is_false = Vec::new();
-        for ch_num in 0..(std::char::MAX as u32) {
-            if std::char::from_u32(ch_num).is_none() {
-                continue;
-            }
-            if ranges.iter().any(|r| r.contains(&ch_num)) {
-                is_true.push(ch_num);
+        for ch in char::MIN..=char::MAX {
+            if ranges.iter().any(|r| r.contains(&ch)) {
+                is_true.push(ch);
             } else {
-                is_false.push(ch_num);
+                is_false.push(ch);
             }
         }
 
@@ -394,20 +400,20 @@ fn generate_tests(data_path: &str, ranges: &[(&str, Vec<Range<u32>>)]) -> String
     s
 }
 
-fn generate_asserts(s: &mut String, property: &str, points: &[u32], truthy: bool) {
+fn generate_asserts(s: &mut String, property: &str, points: &[char], truthy: bool) {
     for range in ranges_from_set(points) {
-        if range.end == range.start + 1 {
+        if range.end == next_char(range.start) {
             s.push_str(&format!(
                 "        assert!({}unicode_data::{}::lookup({:?}), \"{}\");\n",
                 if truthy { "" } else { "!" },
                 property.to_lowercase(),
-                std::char::from_u32(range.start).unwrap(),
+                range.start,
                 range.start,
             ));
         } else {
-            s.push_str(&format!("        for chn in {range:?}u32 {{\n"));
+            s.push_str(&format!("        for chn in {range:?} {{\n"));
             s.push_str(&format!(
-                "            assert!({}unicode_data::{}::lookup(std::char::from_u32(chn).unwrap()), \"{{:?}}\", chn);\n",
+                "            assert!({}unicode_data::{}::lookup(chn), \"{{:?}}\", chn);\n",
                 if truthy { "" } else { "!" },
                 property.to_lowercase(),
             ));
@@ -416,13 +422,13 @@ fn generate_asserts(s: &mut String, property: &str, points: &[u32], truthy: bool
     }
 }
 
-fn ranges_from_set(set: &[u32]) -> Vec<Range<u32>> {
-    let mut ranges = set.iter().map(|e| (*e)..(*e + 1)).collect::<Vec<Range<u32>>>();
+fn ranges_from_set(set: &[char]) -> Vec<Range<char>> {
+    let mut ranges = set.iter().map(|e| *e..next_char(*e)).collect::<Vec<_>>();
     merge_ranges(&mut ranges);
     ranges
 }
 
-fn merge_ranges(ranges: &mut Vec<Range<u32>>) {
+fn merge_ranges(ranges: &mut Vec<Range<char>>) {
     loop {
         let mut new_ranges = Vec::new();
         let mut idx_iter = 0..(ranges.len() - 1);

@@ -22,10 +22,10 @@ impl fmt::Debug for ShortOffsetRunHeader {
 }
 
 impl RawEmitter {
-    pub fn emit_skiplist(&mut self, ranges: &[Range<u32>]) {
+    pub fn emit_skiplist(&mut self, ranges: &[Range<char>]) -> Result<(), fmt::Error> {
         let first_code_point = ranges.first().unwrap().start;
         let mut offsets = Vec::<u32>::new();
-        let points = ranges.iter().flat_map(|r| [r.start, r.end]).collect::<Vec<u32>>();
+        let points = ranges.iter().flat_map(|r| [r.start as u32, r.end as u32]);
         let mut offset = 0;
         for pt in points {
             let delta = pt - offset;
@@ -68,22 +68,20 @@ impl RawEmitter {
             assert!(inserted);
         }
 
-        writeln!(&mut self.file, "use super::ShortOffsetRunHeader;\n").unwrap();
         writeln!(
             &mut self.file,
-            "static SHORT_OFFSET_RUNS: [ShortOffsetRunHeader; {}] = [{}];",
+            "
+use super::ShortOffsetRunHeader;
+
+static SHORT_OFFSET_RUNS: [ShortOffsetRunHeader; {}] = [{}];
+static OFFSETS: [u8; {}] = [{}];",
             short_offset_runs.len(),
-            fmt_list(short_offset_runs.iter())
-        )
-        .unwrap();
-        self.bytes_used += 4 * short_offset_runs.len();
-        writeln!(
-            &mut self.file,
-            "static OFFSETS: [u8; {}] = [{}];",
+            fmt_list(short_offset_runs.iter()),
             coded_offsets.len(),
             fmt_list(&coded_offsets)
-        )
-        .unwrap();
+        )?;
+
+        self.bytes_used += 4 * short_offset_runs.len();
         self.bytes_used += coded_offsets.len();
 
         // The inlining in this code works like the following:
@@ -96,49 +94,35 @@ impl RawEmitter {
         //
         // Thus, in both cases, the `skip_search` function is specialized for the `static`s,
         // and outlined into the prebuilt `std`.
-        if first_code_point > 0x7f {
-            writeln!(&mut self.file, "#[inline]").unwrap();
-            writeln!(&mut self.file, "pub fn lookup(c: char) -> bool {{").unwrap();
-            writeln!(&mut self.file, "    (c as u32) >= {first_code_point:#04x} && lookup_slow(c)")
-                .unwrap();
-            writeln!(&mut self.file, "}}").unwrap();
-            writeln!(&mut self.file).unwrap();
-            writeln!(&mut self.file, "#[inline(never)]").unwrap();
-            writeln!(&mut self.file, "fn lookup_slow(c: char) -> bool {{").unwrap();
+        if first_code_point.is_ascii() {
+            writeln!(&mut self.file, "pub fn lookup(c: char) -> bool {{")?;
         } else {
-            writeln!(&mut self.file, "pub fn lookup(c: char) -> bool {{").unwrap();
+            writeln!(
+                &mut self.file,
+                "\
+#[inline]
+pub fn lookup(c: char) -> bool {{
+    c >= '{}' && lookup_slow(c)
+}}
+#[inline(never)]
+fn lookup_slow(c: char) -> bool {{",
+                first_code_point.escape_unicode()
+            )?;
         }
-        writeln!(&mut self.file, "    const {{").unwrap();
-        writeln!(
-            &mut self.file,
-            "        assert!(SHORT_OFFSET_RUNS.last().unwrap().0 > char::MAX as u32);",
-        )
-        .unwrap();
-        writeln!(&mut self.file, "        let mut i = 0;").unwrap();
-        writeln!(&mut self.file, "        while i < SHORT_OFFSET_RUNS.len() {{").unwrap();
-        writeln!(
-            &mut self.file,
-            "            assert!(SHORT_OFFSET_RUNS[i].start_index() < OFFSETS.len());",
-        )
-        .unwrap();
-        writeln!(&mut self.file, "            i += 1;").unwrap();
-        writeln!(&mut self.file, "        }}").unwrap();
-        writeln!(&mut self.file, "    }}").unwrap();
-        writeln!(
-            &mut self.file,
-            "    // SAFETY: We just ensured the last element of `SHORT_OFFSET_RUNS` is greater than `std::char::MAX`",
-        )
-        .unwrap();
-        writeln!(
-            &mut self.file,
-            "    // and the start indices of all elements in `SHORT_OFFSET_RUNS` are smaller than `OFFSETS.len()`.",
-        )
-        .unwrap();
-        writeln!(
-            &mut self.file,
-            "    unsafe {{ super::skip_search(c, &SHORT_OFFSET_RUNS, &OFFSETS) }}"
-        )
-        .unwrap();
-        writeln!(&mut self.file, "}}").unwrap();
+        writeln!(&mut self.file,
+            "
+    const {{
+        assert!(SHORT_OFFSET_RUNS.last().unwrap().0 > char::MAX as u32);
+        let mut i = 0;
+        while i < SHORT_OFFSET_RUNS.len() {{
+            assert!(SHORT_OFFSET_RUNS[i].start_index() < OFFSETS.len());
+            i += 1;
+        }}
+    }}
+    // SAFETY: We just ensured the last element of `SHORT_OFFSET_RUNS` is greater than `std::char::MAX`
+    // and the start indices of all elements in `SHORT_OFFSET_RUNS` are smaller than `OFFSETS.len()`.
+    unsafe {{ super::skip_search(c, &SHORT_OFFSET_RUNS, &OFFSETS) }}
+}}"
+)
     }
 }

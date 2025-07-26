@@ -23,7 +23,7 @@ impl RawEmitter {
         writeln!(&mut self.file).unwrap();
     }
 
-    fn emit_bitset(&mut self, ranges: &[Range<u32>]) -> Result<(), String> {
+    fn emit_bitset(&mut self, ranges: &[Range<char>]) -> Result<(), String> {
         let first_code_point = ranges.first().unwrap().start;
         let last_code_point = ranges.last().unwrap().end;
         // bitset for every bit in the codepoint range
@@ -98,8 +98,9 @@ impl RawEmitter {
         self.blank_line();
 
         writeln!(&mut self.file, "pub const fn lookup(c: char) -> bool {{").unwrap();
-        if first_code_point > 0x7f {
-            writeln!(&mut self.file, "    (c as u32) >= {first_code_point:#04x} &&").unwrap();
+        if !first_code_point.is_ascii() {
+            writeln!(&mut self.file, "    c >= '{}' &&", first_code_point.escape_unicode())
+                .unwrap();
         }
         writeln!(&mut self.file, "    super::bitset_search(").unwrap();
         writeln!(&mut self.file, "        c as u32,").unwrap();
@@ -152,14 +153,14 @@ impl RawEmitter {
     }
 }
 
-pub fn emit_codepoints(emitter: &mut RawEmitter, ranges: &[Range<u32>]) {
+pub fn emit_codepoints(emitter: &mut RawEmitter, ranges: &[Range<char>]) {
     emitter.blank_line();
 
     let mut bitset = emitter.clone();
     let bitset_ok = bitset.emit_bitset(ranges).is_ok();
 
     let mut skiplist = emitter.clone();
-    skiplist.emit_skiplist(ranges);
+    skiplist.emit_skiplist(ranges).unwrap();
 
     if bitset_ok && bitset.bytes_used <= skiplist.bytes_used {
         *emitter = bitset;
@@ -170,11 +171,11 @@ pub fn emit_codepoints(emitter: &mut RawEmitter, ranges: &[Range<u32>]) {
     }
 }
 
-pub fn emit_whitespace(emitter: &mut RawEmitter, ranges: &[Range<u32>]) {
+pub fn emit_whitespace(emitter: &mut RawEmitter, ranges: &[Range<char>]) {
     emitter.blank_line();
 
     let mut cascading = emitter.clone();
-    cascading.emit_cascading_map(ranges);
+    cascading.emit_cascading_map(ranges).unwrap();
     *emitter = cascading;
     emitter.desc = String::from("cascading");
 }
