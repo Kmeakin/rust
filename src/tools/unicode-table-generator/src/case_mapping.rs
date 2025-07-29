@@ -16,8 +16,9 @@ pub(crate) fn generate_case_mapping(data: &UnicodeData) -> Result<String, fmt::E
 
 #[derive(Default, Clone)]
 struct Plane {
-    single_keys: Vec<HexEscape>,
-    single_vals: Vec<HexEscape>,
+    singles: Vec<(u16, i16)>,
+    single_keys: Vec<(HexEscape, HexEscape)>,
+    single_vals: Vec<i16>,
     multi_keys: Vec<HexEscape>,
     multi_vals: Vec<[CharEscape; 3]>,
 }
@@ -43,9 +44,8 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
             &[val, '\0', '\0'] => {
                 let (val_plane, val_code) = decompose(val);
                 assert_eq!(key_plane, val_plane);
-                let delta = val_code.wrapping_sub(key_code);
-                plane.single_keys.push(HexEscape(key_code));
-                plane.single_vals.push(HexEscape(delta));
+                let delta = val_code.wrapping_sub(key_code) as i16;
+                plane.singles.push((key_code, delta));
             }
             &chars => {
                 plane.multi_keys.push(HexEscape(key_code));
@@ -57,18 +57,52 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
     }
     planes.truncate(num_planes as usize);
 
+    for plane in &mut planes {
+        plane.singles.sort_unstable_by_key(|&(key, _)| key);
+
+        let singles = plane
+            .singles
+            .chunk_by(|(key1, val1), (key2, val2)| val1 == val2 && *key1 == key2 - 1)
+            .map(|chunk| {
+                let (first, val) = chunk.first().unwrap();
+                let (last, _) = chunk.last().unwrap();
+                ((HexEscape(*first), HexEscape(*last)), *val)
+            });
+
+        let (keys, vals): (Vec<_>, Vec<_>) = singles.unzip();
+        plane.single_keys = keys;
+        plane.single_vals = vals;
+    }
+
     let mut tables = String::new();
     writeln!(tables, "static {case}CASE_TABLES: &[Plane; {}] = &[", num_planes)?;
     for plane in planes {
         writeln!(tables, "    Plane {{")?;
-        for (name, table) in [
-            ("single_keys", &plane.single_keys[..]),
-            ("single_vals", &plane.single_vals[..]),
-            ("multi_keys", &plane.multi_keys[..]),
-        ] {
-            writeln!(tables, "        // {} entries, {} bytes", table.len(), size_of_val(table))?;
-            writeln!(tables, "        {name}: &[{}],", fmt_list(table))?;
-        }
+
+        writeln!(
+            tables,
+            "        // {} entries, {} bytes",
+            plane.single_keys.len(),
+            size_of_val(&plane.single_keys[..])
+        )?;
+        writeln!(tables, "        single_keys: &[{}],", fmt_list(plane.single_keys))?;
+
+        writeln!(
+            tables,
+            "        // {} entries, {} bytes",
+            plane.single_vals.len(),
+            size_of_val(&plane.single_vals[..])
+        )?;
+        writeln!(tables, "        single_vals: &[{}],", fmt_list(plane.single_vals))?;
+
+        writeln!(
+            tables,
+            "        // {} entries, {} bytes",
+            plane.multi_vals.len(),
+            size_of_val(&plane.multi_keys[..])
+        )?;
+        writeln!(tables, "        multi_keys: &[{}],", fmt_list(plane.multi_keys))?;
+
         writeln!(
             tables,
             "        // {} entries, {} bytes",
@@ -76,6 +110,7 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
             size_of_val(&plane.multi_vals[..])
         )?;
         writeln!(tables, "        multi_vals: &[{}],", fmt_list(plane.multi_vals))?;
+
         writeln!(tables, "    }},")?;
     }
     writeln!(tables, "];")?;
@@ -103,8 +138,8 @@ impl fmt::Debug for HexEscape {
 
 static HEADER: &str = r"
 struct Plane {
-    single_keys: &'static [u16],
-    single_vals: &'static [u16],
+    single_keys: &'static [(u16, u16)],
+    single_vals: &'static [i16],
     multi_keys: &'static [u16],
     multi_vals: &'static [[char; 3]],
 }
@@ -123,7 +158,15 @@ fn lookup(c: char, tables: &[Plane]) -> [char; 3] {
         return *unsafe { plane.multi_vals.get_unchecked(multi_index) };
     }
 
-    if let Ok(single_index) = plane.single_keys.binary_search(&code) {
+    if let Ok(single_index) = plane.single_keys.binary_search_by(|(lo, hi)| {
+        if *lo <= code && code <= *hi {
+            crate::cmp::Ordering::Equal
+        } else if code < *lo {
+            crate::cmp::Ordering::Less
+        } else {
+            crate::cmp::Ordering::Greater
+        }
+    }) {
         // SAFETY: Index comes from statically generated table
         let code = *unsafe { plane.single_vals.get_unchecked(single_index) };
         let c = unsafe { char::from_u32_unchecked((plane_index * 0x10_000) | (code as u32)) };
