@@ -17,7 +17,7 @@ pub(crate) fn generate_case_mapping(data: &UnicodeData) -> Result<String, fmt::E
 #[derive(Default, Clone)]
 struct Plane {
     singles: Vec<(u16, i16)>,
-    single_keys: Vec<(HexEscape, HexEscape)>,
+    single_keys: Vec<(HexEscape, u8, u8)>,
     single_vals: Vec<i16>,
     multi_keys: Vec<HexEscape>,
     multi_vals: Vec<[CharEscape; 3]>,
@@ -60,13 +60,27 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
     for plane in &mut planes {
         plane.singles.sort_unstable_by_key(|&(key, _)| key);
 
-        let singles = plane
+        let singles: Vec<_> = plane
             .singles
             .chunk_by(|(key1, val1), (key2, val2)| val1 == val2 && *key1 == key2 - 1)
             .map(|chunk| {
-                let (first, val) = chunk.first().unwrap();
-                let (last, _) = chunk.last().unwrap();
-                ((HexEscape(*first), HexEscape(*last)), *val)
+                let (start, val) = chunk.first().unwrap();
+                let (end, _) = chunk.last().unwrap();
+                (*start, *end, *val)
+            })
+            .collect();
+
+        let singles = singles
+            .chunk_by(|(start1, end1, val1), (start2, end2, val2)| {
+                val1 == val2 && start1 == end1 && start2 == end2 && *start1 == start2 - 2
+            })
+            .map(|chunk| {
+                let (start, _, val) = chunk.first().unwrap();
+                let (_, end, _) = chunk.last().unwrap();
+                let len = u8::try_from(end - start).unwrap();
+                let step = if chunk.len() == 1 { 1u8 } else { 2u8 };
+                let key = (HexEscape(*start), len, step);
+                (key, *val)
             });
 
         let (keys, vals): (Vec<_>, Vec<_>) = singles.unzip();
@@ -138,7 +152,7 @@ impl fmt::Debug for HexEscape {
 
 static HEADER: &str = r"
 struct Plane {
-    single_keys: &'static [(u16, u16)],
+    single_keys: &'static [(u16, u8, u8)],
     single_vals: &'static [i16],
     multi_keys: &'static [u16],
     multi_vals: &'static [[char; 3]],
@@ -158,10 +172,11 @@ fn lookup(c: char, tables: &[Plane]) -> [char; 3] {
         return *unsafe { plane.multi_vals.get_unchecked(multi_index) };
     }
 
-    if let Ok(single_index) = plane.single_keys.binary_search_by(|(lo, hi)| {
-        if *lo <= code && code <= *hi {
+    if let Ok(single_index) = plane.single_keys.binary_search_by(|(start, len, _)| {
+        let end = start + *len as u16;
+        if *start <= code && code <= end {
             crate::cmp::Ordering::Equal
-        } else if code < *lo {
+        } else if code < *start {
             crate::cmp::Ordering::Less
         } else {
             crate::cmp::Ordering::Greater
