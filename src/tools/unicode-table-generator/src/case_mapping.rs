@@ -43,8 +43,9 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
             &[val, '\0', '\0'] => {
                 let (val_plane, val_code) = decompose(val);
                 assert_eq!(key_plane, val_plane);
+                let delta = val_code.wrapping_sub(key_code);
                 plane.single_keys.push(HexEscape(key_code));
-                plane.single_vals.push(HexEscape(val_code));
+                plane.single_vals.push(HexEscape(delta));
             }
             &chars => {
                 plane.multi_keys.push(HexEscape(key_code));
