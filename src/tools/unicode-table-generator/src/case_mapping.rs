@@ -20,7 +20,7 @@ struct Plane {
     single_keys: Vec<(HexEscape, u8, u8)>,
     single_vals: Vec<i16>,
     multi_keys: Vec<HexEscape>,
-    multi_vals: Vec<[CharEscape; 3]>,
+    multi_vals: Vec<[HexEscape; 3]>,
 }
 
 fn decompose(c: char) -> (u16, u16) {
@@ -49,7 +49,11 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
             }
             &chars => {
                 plane.multi_keys.push(HexEscape(key_code));
-                plane.multi_vals.push(chars.map(CharEscape));
+                plane.multi_vals.push(chars.map(|val| {
+                    let (val_plane, val_code) = decompose(val);
+                    assert_eq!(key_plane, val_plane);
+                    HexEscape(val_code)
+                }));
             }
         }
 
@@ -130,15 +134,6 @@ fn generate_tables(case: &str, data: &CaseMap) -> Result<String, fmt::Error> {
     writeln!(tables, "];")?;
 
     Ok(tables)
-}
-
-#[derive(Copy, Clone)]
-struct CharEscape(char);
-
-impl fmt::Debug for CharEscape {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "'{}'", self.0.escape_default())
-    }
 }
 
 #[derive(Default, Clone)]
