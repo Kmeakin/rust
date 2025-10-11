@@ -96,20 +96,16 @@ impl RawEmitter {
         //
         // Thus, in both cases, the `skip_search` function is specialized for the `static`s,
         // and outlined into the prebuilt `std`.
-        if first_code_point > 0x7f {
-            writeln!(&mut self.file, "#[inline]").unwrap();
-            writeln!(&mut self.file, "pub fn lookup(c: char) -> bool {{").unwrap();
-            writeln!(&mut self.file, "    debug_assert!(!c.is_ascii());").unwrap();
-            writeln!(&mut self.file, "    (c as u32) >= {first_code_point:#04x} && lookup_slow(c)")
-                .unwrap();
-            writeln!(&mut self.file, "}}").unwrap();
-            writeln!(&mut self.file).unwrap();
-            writeln!(&mut self.file, "#[inline(never)]").unwrap();
-            writeln!(&mut self.file, "fn lookup_slow(c: char) -> bool {{").unwrap();
-        } else {
-            writeln!(&mut self.file, "pub fn lookup(c: char) -> bool {{").unwrap();
-            writeln!(&mut self.file, "    debug_assert!(!c.is_ascii());").unwrap();
-        }
+        assert!(first_code_point > 0x7f);
+        writeln!(&mut self.file, "#[inline]").unwrap();
+        writeln!(&mut self.file, "pub fn lookup(c: char) -> bool {{").unwrap();
+        writeln!(&mut self.file, "    debug_assert!(!c.is_ascii());").unwrap();
+        writeln!(&mut self.file, "    (c as u32) >= {first_code_point:#04x} && lookup_slow(c)")
+            .unwrap();
+        writeln!(&mut self.file, "}}").unwrap();
+        writeln!(&mut self.file).unwrap();
+        writeln!(&mut self.file, "#[inline(never)]").unwrap();
+        writeln!(&mut self.file, "fn lookup_slow(c: char) -> bool {{").unwrap();
         writeln!(&mut self.file, "    const {{").unwrap();
         writeln!(
             &mut self.file,
