@@ -12,6 +12,7 @@
 // Total           : 31911 bytes
 
 pub const UNICODE_VERSION: (u8, u8, u8) = (17, 0, 0);
+
 use super::rt::*;
 
 pub mod alphabetic {
@@ -432,7 +433,6 @@ pub mod lowercase {
         (1, 140), (1, 136), (1, 132), (2, 146), (2, 144), (2, 83), (3, 93), (3, 147), (3, 133),
         (4, 12), (4, 6), (5, 187), (6, 78),
     ];
-
     pub const fn lookup(c: char) -> bool {
         debug_assert!(!c.is_ascii());
         (c as u32) >= 0xaa
@@ -590,7 +590,6 @@ pub mod uppercase {
         (0, 131), (0, 64), (1, 66), (1, 70), (1, 83), (1, 12), (1, 8), (2, 146), (2, 140), (2, 134),
         (2, 130), (3, 164), (3, 146), (3, 20), (4, 178), (4, 171),
     ];
-
     pub const fn lookup(c: char) -> bool {
         debug_assert!(!c.is_ascii());
         (c as u32) >= 0xc0
@@ -616,6 +615,7 @@ pub mod white_space {
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
     ];
+
     #[inline]
     pub const fn lookup(c: char) -> bool {
         debug_assert!(!c.is_ascii());
@@ -630,7 +630,7 @@ pub mod white_space {
 }
 
 pub mod conversions {
-    const INDEX_MASK: u32 = 0x400000;
+    const INDEX_MASK: u32 = 1 << 22;
 
     pub fn to_lower(c: char) -> [char; 3] {
         if c.is_ascii() {
@@ -1027,7 +1027,6 @@ pub mod conversions {
         ('\u{1e91d}', 125247), ('\u{1e91e}', 125248), ('\u{1e91f}', 125249), ('\u{1e920}', 125250),
         ('\u{1e921}', 125251),
     ];
-
     #[rustfmt::skip]
     static LOWERCASE_TABLE_MULTI: &[[char; 3]; 1] = &[
         ['i', '\u{307}', '\u{0}'],
@@ -1413,7 +1412,6 @@ pub mod conversions {
         ('\u{1e93d}', 125211), ('\u{1e93e}', 125212), ('\u{1e93f}', 125213), ('\u{1e940}', 125214),
         ('\u{1e941}', 125215), ('\u{1e942}', 125216), ('\u{1e943}', 125217),
     ];
-
     #[rustfmt::skip]
     static UPPERCASE_TABLE_MULTI: &[[char; 3]; 102] = &[
         ['S', 'S', '\u{0}'], ['\u{2bc}', 'N', '\u{0}'], ['J', '\u{30c}', '\u{0}'],
