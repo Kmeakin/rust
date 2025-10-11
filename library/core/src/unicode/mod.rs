@@ -19,6 +19,8 @@ pub(crate) use unicode_data::white_space::lookup as White_Space;
 pub(crate) mod printable;
 
 #[allow(unreachable_pub)]
+mod rt;
+#[allow(unreachable_pub)]
 mod unicode_data;
 
 /// The version of [Unicode](https://www.unicode.org/) that the Unicode parts of
