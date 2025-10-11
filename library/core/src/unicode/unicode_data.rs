@@ -339,14 +339,16 @@ pub mod grapheme_extend {
 }
 
 pub mod lowercase {
-    static BITSET_CHUNKS_MAP: [u8; 123] = [
+    use super::Function;
+
+    static L1_LUT: [u8; 123] = [
         12, 17, 0, 0, 9, 0, 0, 13, 14, 10, 0, 16, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 0, 4, 1, 0, 15, 0, 8, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
         0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 19,
         0, 3, 18, 0, 7,
     ];
-    static BITSET_INDEX_CHUNKS: [[u8; 16]; 20] = [
+    static L2_LUT: [[u8; 16]; 20] = [
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 63, 0, 0],
         [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 14, 57, 0],
@@ -368,7 +370,7 @@ pub mod lowercase {
         [16, 74, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
         [67, 42, 56, 11, 68, 65, 18, 13, 1, 66, 78, 21, 75, 76, 4, 46],
     ];
-    static BITSET_CANONICAL: [u64; 57] = [
+    static BITSET: [u64; 57] = [
         0b0000000000000000000000000000000000000000000000000000000000000000,
         0b0000111111111111111111111111110000000000000000000000000011111111,
         0b1010101010101010101010101010101010101010101010101010100000000010,
@@ -427,22 +429,34 @@ pub mod lowercase {
         0b1110011001010001001011010010101001001110001001000011000100101001,
         0b1110101111000000000000000000000000001111111111111111111111111100,
     ];
-    #[rustfmt::skip]
-    static BITSET_MAPPING: [(u8, u8); 22] = [
-        (0, 64), (1, 184), (1, 182), (1, 179), (1, 172), (1, 168), (1, 161), (1, 146), (1, 144),
-        (1, 140), (1, 136), (1, 132), (2, 146), (2, 144), (2, 83), (3, 93), (3, 147), (3, 133),
-        (4, 12), (4, 6), (5, 187), (6, 78),
+    static BITSET_MAPPED: [(u8, Function); 22] = [
+        (0, Function::invert()),
+        (1, Function::shift_right(56)),
+        (1, Function::shift_right(54)),
+        (1, Function::shift_right(51)),
+        (1, Function::shift_right(44)),
+        (1, Function::shift_right(40)),
+        (1, Function::shift_right(33)),
+        (1, Function::shift_right(18)),
+        (1, Function::shift_right(16)),
+        (1, Function::shift_right(12)),
+        (1, Function::shift_right(8)),
+        (1, Function::shift_right(4)),
+        (2, Function::shift_right(18)),
+        (2, Function::shift_right(16)),
+        (2, Function::rotate_and_invert(19)),
+        (3, Function::rotate_and_invert(29)),
+        (3, Function::shift_right(19)),
+        (3, Function::shift_right(5)),
+        (4, Function::rotate(12)),
+        (4, Function::rotate(6)),
+        (5, Function::shift_right(59)),
+        (6, Function::rotate_and_invert(14)),
     ];
     pub const fn lookup(c: char) -> bool {
         debug_assert!(!c.is_ascii());
         (c as u32) >= 0xaa
-            && super::bitset_search(
-                c as u32,
-                &BITSET_CHUNKS_MAP,
-                &BITSET_INDEX_CHUNKS,
-                &BITSET_CANONICAL,
-                &BITSET_MAPPING,
-            )
+            && super::bitset_search(c as u32, &L1_LUT, &L2_LUT, &BITSET, &BITSET_MAPPED)
     }
 }
 
@@ -512,14 +526,16 @@ pub mod n {
 }
 
 pub mod uppercase {
-    static BITSET_CHUNKS_MAP: [u8; 125] = [
+    use super::Function;
+
+    static L1_LUT: [u8; 125] = [
         3, 14, 6, 6, 0, 6, 6, 2, 5, 12, 6, 15, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
         6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 9, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
         6, 6, 6, 6, 7, 6, 13, 6, 11, 6, 6, 1, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6,
         6, 6, 8, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 6, 16, 6,
         6, 6, 6, 10, 6, 4,
     ];
-    static BITSET_INDEX_CHUNKS: [[u8; 16]; 17] = [
+    static L2_LUT: [[u8; 16]; 17] = [
         [44, 44, 5, 35, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 5, 0],
         [44, 44, 5, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
         [44, 44, 40, 44, 44, 44, 44, 44, 17, 17, 66, 17, 43, 29, 24, 23],
@@ -538,7 +554,7 @@ pub mod uppercase {
         [52, 38, 17, 27, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44, 44],
         [58, 1, 26, 55, 12, 7, 25, 56, 41, 59, 6, 2, 62, 61, 60, 68],
     ];
-    static BITSET_CANONICAL: [u64; 44] = [
+    static BITSET: [u64; 44] = [
         0b0000000000111111111111111111111111111111111111111111111111111111,
         0b1111111111111111111111110000000000000000000000000011111111111111,
         0b0000011111111111111111111111110000000000000000000000000000000001,
@@ -584,22 +600,37 @@ pub mod uppercase {
         0b1111011111111111000000000000000000000000000000000000000000000000,
         0b1111111100000000111111110000000000111111000000001111111100000000,
     ];
-    #[rustfmt::skip]
-    static BITSET_MAPPING: [(u8, u8); 25] = [
-        (0, 182), (0, 74), (0, 166), (0, 162), (0, 159), (0, 150), (0, 148), (0, 142), (0, 134),
-        (0, 131), (0, 64), (1, 66), (1, 70), (1, 83), (1, 12), (1, 8), (2, 146), (2, 140), (2, 134),
-        (2, 130), (3, 164), (3, 146), (3, 20), (4, 178), (4, 171),
+    static BITSET_MAPPED: [(u8, Function); 25] = [
+        (0, Function::shift_right(54)),
+        (0, Function::rotate_and_invert(10)),
+        (0, Function::shift_right(38)),
+        (0, Function::shift_right(34)),
+        (0, Function::shift_right(31)),
+        (0, Function::shift_right(22)),
+        (0, Function::shift_right(20)),
+        (0, Function::shift_right(14)),
+        (0, Function::shift_right(6)),
+        (0, Function::shift_right(3)),
+        (0, Function::invert()),
+        (1, Function::rotate_and_invert(2)),
+        (1, Function::rotate_and_invert(6)),
+        (1, Function::rotate_and_invert(19)),
+        (1, Function::rotate(12)),
+        (1, Function::rotate(8)),
+        (2, Function::shift_right(18)),
+        (2, Function::shift_right(12)),
+        (2, Function::shift_right(6)),
+        (2, Function::shift_right(2)),
+        (3, Function::shift_right(36)),
+        (3, Function::shift_right(18)),
+        (3, Function::rotate(20)),
+        (4, Function::shift_right(50)),
+        (4, Function::shift_right(43)),
     ];
     pub const fn lookup(c: char) -> bool {
         debug_assert!(!c.is_ascii());
         (c as u32) >= 0xc0
-            && super::bitset_search(
-                c as u32,
-                &BITSET_CHUNKS_MAP,
-                &BITSET_INDEX_CHUNKS,
-                &BITSET_CANONICAL,
-                &BITSET_MAPPING,
-            )
+            && super::bitset_search(c as u32, &L1_LUT, &L2_LUT, &BITSET, &BITSET_MAPPED)
     }
 }
 
@@ -620,10 +651,10 @@ pub mod white_space {
     pub const fn lookup(c: char) -> bool {
         debug_assert!(!c.is_ascii());
         match c as u32 >> 8 {
-            0 => WHITESPACE_MAP[c as usize & 0xff] & 1 != 0,
-            22 => c as u32 == 0x1680,
-            32 => WHITESPACE_MAP[c as usize & 0xff] & 2 != 0,
-            48 => c as u32 == 0x3000,
+            0x00 => WHITESPACE_MAP[c as usize & 0xff] & 1 != 0,
+            0x16 => c as u32 == 0x1680,
+            0x20 => WHITESPACE_MAP[c as usize & 0xff] & 2 != 0,
+            0x30 => c as u32 == 0x3000,
             _ => false,
         }
     }
@@ -634,39 +665,39 @@ pub mod conversions {
 
     pub fn to_lower(c: char) -> [char; 3] {
         if c.is_ascii() {
-            [(c as u8).to_ascii_lowercase() as char, '\0', '\0']
-        } else {
-            LOWERCASE_TABLE
-                .binary_search_by(|&(key, _)| key.cmp(&c))
-                .map(|i| {
-                    let u = LOWERCASE_TABLE[i].1;
-                    char::from_u32(u).map(|c| [c, '\0', '\0']).unwrap_or_else(|| {
-                        // SAFETY: Index comes from statically generated table
-                        unsafe {
-                            *LOWERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize)
-                        }
-                    })
-                })
-                .unwrap_or([c, '\0', '\0'])
+            return [c.to_ascii_lowercase(), '\0', '\0'];
+        }
+
+        let Ok(i) = LOWERCASE_TABLE.binary_search_by(|&(key, _)| key.cmp(&c)) else {
+            return [c, '\0', '\0'];
+        };
+
+        let (_, u) = LOWERCASE_TABLE[i];
+        match char::from_u32(u) {
+            Some(c) => [c, '\0', '\0'],
+            None => {
+                // SAFETY: Index comes from statically generated table
+                unsafe { *LOWERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize) }
+            }
         }
     }
 
     pub fn to_upper(c: char) -> [char; 3] {
         if c.is_ascii() {
-            [(c as u8).to_ascii_uppercase() as char, '\0', '\0']
-        } else {
-            UPPERCASE_TABLE
-                .binary_search_by(|&(key, _)| key.cmp(&c))
-                .map(|i| {
-                    let u = UPPERCASE_TABLE[i].1;
-                    char::from_u32(u).map(|c| [c, '\0', '\0']).unwrap_or_else(|| {
-                        // SAFETY: Index comes from statically generated table
-                        unsafe {
-                            *UPPERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize)
-                        }
-                    })
-                })
-                .unwrap_or([c, '\0', '\0'])
+            return [c.to_ascii_uppercase(), '\0', '\0'];
+        }
+
+        let Ok(i) = UPPERCASE_TABLE.binary_search_by(|&(key, _)| key.cmp(&c)) else {
+            return [c, '\0', '\0'];
+        };
+
+        let (_, u) = UPPERCASE_TABLE[i];
+        match char::from_u32(u) {
+            Some(c) => [c, '\0', '\0'],
+            None => {
+                // SAFETY: Index comes from statically generated table
+                unsafe { *UPPERCASE_TABLE_MULTI.get_unchecked((u & (INDEX_MASK - 1)) as usize) }
+            }
         }
     }
 

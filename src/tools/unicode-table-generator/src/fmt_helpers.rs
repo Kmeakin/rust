@@ -49,6 +49,23 @@ impl<T: fmt::Binary> fmt::Display for Bin<T> {
     }
 }
 
+/// Wrapper type for formatting a `T` using its `LowerHex` implementation.
+#[derive(Copy, Clone)]
+pub struct Hex<T>(pub T);
+
+impl<T: fmt::LowerHex> fmt::Debug for Hex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let nibbles = size_of::<T>() * 2;
+        std::write!(f, "0x{:0nibbles$x}", self.0)
+    }
+}
+
+impl<T: fmt::LowerHex> fmt::Display for Hex<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
 /// Wrapper type for formatting a `char` using `escape_default`.
 #[derive(Copy, Clone)]
 pub struct CharEscape(pub char);

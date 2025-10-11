@@ -1,75 +1,57 @@
-use std::collections::HashMap;
 use std::ops::Range;
 
-use crate::raw_emitter::RawEmitter;
-use crate::writeln;
+use crate::{Hex, Lookup, writeln};
 
-impl RawEmitter {
-    pub fn emit_cascading_map(&mut self, ranges: &[Range<u32>]) -> bool {
-        let mut map: [u8; 256] = [
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ];
+pub fn emit_cascading_map(ranges: &[Range<u32>]) -> Lookup {
+    let mut map: [u8; 256] = [0; 256];
 
-        let points = ranges
-            .iter()
-            .flat_map(|r| (r.start..r.end).collect::<Vec<u32>>())
-            .collect::<Vec<u32>>();
+    let points =
+        ranges.iter().cloned().flatten().map(|c| u16::try_from(c).unwrap()).collect::<Vec<_>>();
+    let chunks = points
+        .chunk_by(|c1, c2| {
+            let [high_byte1, _] = c1.to_be_bytes();
+            let [high_byte2, _] = c2.to_be_bytes();
+            high_byte1 == high_byte2
+        })
+        .map(|chunk| {
+            let c = chunk.first().unwrap();
+            let [high_byte, _] = c.to_be_bytes();
+            (Hex(high_byte), chunk)
+        });
 
-        // how many distinct ranges need to be counted?
-        let mut codepoints_by_high_bytes = HashMap::<usize, Vec<u32>>::new();
-        for point in points {
-            // assert that there is no whitespace over the 0x3000 range.
-            assert!(point <= 0x3000, "the highest unicode whitespace value has changed");
-            let high_bytes = point as usize >> 8;
-            let codepoints = codepoints_by_high_bytes.entry(high_bytes).or_default();
-            codepoints.push(point);
+    let mut bit_for_high_byte = 1u8;
+    let mut arms = String::new();
+
+    for (high_byte, chunk) in chunks {
+        if let [codepoint] = chunk {
+            let codepoint = Hex(*codepoint);
+            writeln!(arms, "{high_byte} => c as u32 == {codepoint},");
+            continue;
         }
 
-        let mut bit_for_high_byte = 1u8;
-        let mut arms = String::new();
-
-        let mut high_bytes: Vec<usize> = codepoints_by_high_bytes.keys().copied().collect();
-        high_bytes.sort();
-        for high_byte in high_bytes {
-            let codepoints = codepoints_by_high_bytes.get_mut(&high_byte).unwrap();
-            if codepoints.len() == 1 {
-                let ch = codepoints.pop().unwrap();
-                writeln!(arms, "{high_byte} => c as u32 == {ch:#04x},");
-                continue;
-            }
-            // more than 1 codepoint in this arm
-            for codepoint in codepoints {
-                map[(*codepoint & 0xff) as usize] |= bit_for_high_byte;
-            }
-            writeln!(
-                arms,
-                "{high_byte} => WHITESPACE_MAP[c as usize & 0xff] & {bit_for_high_byte} != 0,"
-            );
-            bit_for_high_byte <<= 1;
+        for codepoint in chunk {
+            map[(*codepoint & 0xff) as usize] |= bit_for_high_byte;
         }
-
-        self.bytes_used += 256;
-        self.file = format!(
-            "static WHITESPACE_MAP: [u8; 256] = {map:?};
-
-            #[inline]
-            pub const fn lookup(c: char) -> bool {{
-                debug_assert!(!c.is_ascii());
-                match c as u32 >> 8 {{
-                    {arms}\
-                    _ => false,
-                }}
-            }}"
+        writeln!(
+            arms,
+            "{high_byte} => WHITESPACE_MAP[c as usize & 0xff] & {bit_for_high_byte} != 0,"
         );
-
-        true
+        bit_for_high_byte <<= 1;
     }
+
+    let bytes_used = size_of_val(&map);
+    let file = format!(
+        "static WHITESPACE_MAP: [u8; 256] = {map:?};
+
+        #[inline]
+        pub const fn lookup(c: char) -> bool {{
+            debug_assert!(!c.is_ascii());
+            match c as u32 >> 8 {{
+                {arms}\
+                _ => false,
+            }}
+        }}"
+    );
+
+    Lookup { file, bytes_used, desc: "cascading" }
 }

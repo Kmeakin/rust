@@ -76,15 +76,14 @@ use std::ops::Range;
 
 use ucd_parse::Codepoints;
 
+mod bitset;
 mod cascading_map;
 mod case_mapping;
 mod fmt_helpers;
-mod raw_emitter;
 mod skiplist;
 mod unicode_download;
 
 pub use fmt_helpers::*;
-use raw_emitter::{RawEmitter, emit_codepoints, emit_whitespace};
 
 static PROPERTIES: &[&str] = &[
     "Alphabetic",
@@ -239,26 +238,24 @@ fn main() {
     for (property, ranges) in ranges_by_property {
         let datapoints = ranges.iter().map(|r| r.end - r.start).sum::<u32>();
 
-        let mut emitter = RawEmitter::new();
-        if property == &"White_Space" {
-            emit_whitespace(&mut emitter, ranges);
-        } else {
-            emit_codepoints(&mut emitter, ranges);
-        }
+        let lookup = match property {
+            &"White_Space" => cascading_map::emit_cascading_map(ranges),
+            _ => emit_codepoints(ranges),
+        };
 
-        modules.push((property.to_lowercase().to_string(), emitter.file));
+        modules.push((property.to_lowercase(), lookup.file));
         writeln!(
             table_file,
             "// {:16}: {:5} bytes, {:6} codepoints in {:3} ranges (U+{:06X} - U+{:06X}) using {}",
             property,
-            emitter.bytes_used,
+            lookup.bytes_used,
             datapoints,
             ranges.len(),
             ranges.first().unwrap().start,
             ranges.last().unwrap().end,
-            emitter.desc,
+            lookup.desc,
         );
-        total_bytes += emitter.bytes_used;
+        total_bytes += lookup.bytes_used;
     }
     let (conversions, sizes) = case_mapping::generate_case_mapping(&unicode_data);
     for (name, size) in ["to_lower", "to_upper"].iter().zip(sizes) {
@@ -286,6 +283,22 @@ fn main() {
 
 fn rustfmt(path: &str) {
     std::process::Command::new("rustfmt").arg(path).status().expect("rustfmt failed");
+}
+
+pub struct Lookup {
+    pub file: String,
+    pub desc: &'static str,
+    pub bytes_used: usize,
+}
+
+fn emit_codepoints(ranges: &[Range<u32>]) -> Lookup {
+    let bitset = bitset::emit_bitset(ranges);
+    let skiplist = skiplist::emit_skiplist(ranges);
+
+    match bitset {
+        Ok(bitset) if bitset.bytes_used <= skiplist.bytes_used => bitset,
+        _ => skiplist,
+    }
 }
 
 fn version() -> String {

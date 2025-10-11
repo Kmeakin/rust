@@ -1,42 +1,67 @@
 //! Runtime support for `unicode_data`.
 
+#[repr(transparent)]
+pub struct Function(u8);
+
+impl Function {
+    pub const fn invert() -> Self {
+        Self(1 << 6)
+    }
+
+    pub const fn rotate(shift: u8) -> Self {
+        assert!(shift < 64);
+        Self(shift)
+    }
+
+    pub const fn rotate_and_invert(shift: u8) -> Self {
+        assert!(shift < 64);
+        Self((1 << 6) | shift)
+    }
+
+    pub const fn shift_right(shift: u8) -> Self {
+        assert!(shift < 64);
+        Self((1 << 7) | shift)
+    }
+}
+
+// FIXME(const-hack): Revert to `slice::get` when slice indexing becomes possible in const.
+const fn get<T: Copy>(slice: &[T], idx: usize) -> Option<T> {
+    if idx < slice.len() { Some(slice[idx]) } else { None }
+}
+
 #[inline(always)]
 pub const fn bitset_search<
-    const N: usize,
-    const CHUNK_SIZE: usize,
-    const N1: usize,
-    const CANONICAL: usize,
-    const CANONICALIZED: usize,
+    const L1_LEN: usize,
+    const L2_LEN: usize,
+    const L2_INNER_LEN: usize,
+    const BITSET_LEN: usize,
+    const BITSET_MAPPED_LEN: usize,
 >(
     needle: u32,
-    chunk_idx_map: &[u8; N],
-    bitset_chunk_idx: &[[u8; CHUNK_SIZE]; N1],
-    bitset_canonical: &[u64; CANONICAL],
-    bitset_canonicalized: &[(u8, u8); CANONICALIZED],
+    l1_lut: &[u8; L1_LEN],
+    l2_lut: &[[u8; L2_INNER_LEN]; L2_LEN],
+    bitset: &[u64; BITSET_LEN],
+    bitset_mapped: &[(u8, Function); BITSET_MAPPED_LEN],
 ) -> bool {
     let bucket_idx = (needle / 64) as usize;
-    let chunk_map_idx = bucket_idx / CHUNK_SIZE;
-    let chunk_piece = bucket_idx % CHUNK_SIZE;
-    // FIXME(const-hack): Revert to `slice::get` when slice indexing becomes possible in const.
-    let chunk_idx = if chunk_map_idx < chunk_idx_map.len() {
-        chunk_idx_map[chunk_map_idx]
+    let l1_idx = bucket_idx / L2_INNER_LEN;
+    let chunk_piece = bucket_idx % L2_INNER_LEN;
+    let Some(l2_idx) = get(l1_lut, l1_idx) else { return false };
+    let bitset_idx = l2_lut[l2_idx as usize][chunk_piece] as usize;
+    let word = if let Some(word) = get(bitset, bitset_idx) {
+        word
     } else {
-        return false;
-    };
-    let idx = bitset_chunk_idx[chunk_idx as usize][chunk_piece] as usize;
-    // FIXME(const-hack): Revert to `slice::get` when slice indexing becomes possible in const.
-    let word = if idx < bitset_canonical.len() {
-        bitset_canonical[idx]
-    } else {
-        let (real_idx, mapping) = bitset_canonicalized[idx - bitset_canonical.len()];
-        let mut word = bitset_canonical[real_idx as usize];
-        let should_invert = mapping & (1 << 6) != 0;
+        const LOWER_6: u8 = (1 << 6) - 1;
+
+        let (bitset_idx, Function(fun)) = bitset_mapped[bitset_idx - bitset.len()];
+        let mut word = bitset[bitset_idx as usize];
+        let should_invert = fun & (1 << 6) != 0;
         if should_invert {
             word = !word;
         }
         // Lower 6 bits
-        let quantity = mapping & ((1 << 6) - 1);
-        if mapping & (1 << 7) != 0 {
+        let quantity = fun & LOWER_6;
+        if fun & (1 << 7) != 0 {
             // shift
             word >>= quantity as u64;
         } else {
