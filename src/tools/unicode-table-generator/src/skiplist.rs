@@ -71,7 +71,7 @@ impl RawEmitter {
         writeln!(&mut self.file, "use super::ShortOffsetRunHeader;\n").unwrap();
         writeln!(
             &mut self.file,
-            "static SHORT_OFFSET_RUNS: [ShortOffsetRunHeader; {}] = [{}];",
+            "#[rustfmt::skip]\nstatic SHORT_OFFSET_RUNS: [ShortOffsetRunHeader; {}] = [{}];",
             short_offset_runs.len(),
             fmt_list(short_offset_runs.iter())
         )

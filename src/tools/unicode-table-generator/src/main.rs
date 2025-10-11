@@ -225,6 +225,7 @@ fn main() {
 
     if let Some(path) = test_path {
         std::fs::write(&path, generate_tests(&unicode_data).unwrap()).unwrap();
+        rustfmt(&path);
     }
 
     let mut table_file = String::new();
@@ -272,7 +273,6 @@ fn main() {
     modules.push((String::from("conversions"), conversions));
 
     for (name, contents) in modules {
-        table_file.push_str("#[rustfmt::skip]\n");
         table_file.push_str(&format!("pub mod {name} {{\n"));
         for line in contents.lines() {
             if !line.trim().is_empty() {
@@ -285,6 +285,11 @@ fn main() {
     }
 
     std::fs::write(&write_location, format!("{}\n", table_file.trim_end())).unwrap();
+    rustfmt(&write_location);
+}
+
+fn rustfmt(path: &str) {
+    std::process::Command::new("rustfmt").arg(path).status().expect("rustfmt failed");
 }
 
 fn version() -> String {

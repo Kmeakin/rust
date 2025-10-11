@@ -85,7 +85,7 @@ impl RawEmitter {
         self.bytes_used += 8 * canonicalized.canonical_words.len();
         writeln!(
             &mut self.file,
-            "static BITSET_MAPPING: [(u8, u8); {}] = [{}];",
+            "#[rustfmt::skip]\nstatic BITSET_MAPPING: [(u8, u8); {}] = [{}];",
             canonicalized.canonicalized_words.len(),
             fmt_list(&canonicalized.canonicalized_words),
         )
